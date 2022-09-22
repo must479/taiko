@@ -22,10 +22,7 @@ library LibBridgeProcess {
     using LibBridgeRead for LibBridgeData.State;
 
     /**
-     * @dev This function can be called by any address, including `message. owner`.
-     * It "processes" the message, i.e. takes custody of the attached ether,
-     * attempts to invoke the messageCall, changes the message's status accordingly.
-     * Also refunds processing fee if necessary.
+     * @dev This function can be called by any address, including `message.owner`.
      */
     function processMessage(
         LibBridgeData.State storage state,
@@ -38,16 +35,13 @@ library LibBridgeProcess {
         }
 
         uint256 gasStart = gasleft();
-        // The message's destination chain must be the current chain.
         require(message.destChainId == block.chainid, "B:destChainId");
-        // The status of the message must be "NEW"; RETRIABLE is handled in
-        // LibBridgeRetry.sol
+
         bytes32 mhash = message.hashMessage();
         require(
             state.messageStatus[mhash] == IBridge.MessageStatus.NEW,
             "B:status"
         );
-        // Message must have been "received" on the destChain (current chain)
         require(
             LibBridgeRead.isMessageReceived(
                 resolver,

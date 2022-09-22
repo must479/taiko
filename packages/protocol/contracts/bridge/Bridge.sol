@@ -64,14 +64,13 @@ contract Bridge is EssentialContract, IBridge {
         nonReentrant
         returns (bytes32 mhash)
     {
-        return state.sendMessage(message); //LibBridgeSend
+        return state.sendMessage(message);
     }
 
     function processMessage(Message calldata message, bytes calldata proof)
         external
         nonReentrant
     {
-        //LibBridgeProcess
         return state.processMessage(AddressResolver(this), message, proof);
     }
 
@@ -79,14 +78,14 @@ contract Bridge is EssentialContract, IBridge {
         external
         nonReentrant
     {
-        return state.retryMessage(message, lastAttempt); //LibBridgeRetry
+        return state.retryMessage(message, lastAttempt);
     }
 
     function enableDestChain(uint256 _chainId, bool enabled)
         external
         nonReentrant
     {
-        state.enableDestChain(_chainId, enabled); //LibBridgeSend
+        state.enableDestChain(_chainId, enabled);
     }
 
     /*********************
@@ -94,7 +93,6 @@ contract Bridge is EssentialContract, IBridge {
      *********************/
 
     function isMessageSent(bytes32 mhash) public view virtual returns (bool) {
-        // * Why is this LibBridgeRead and not state or AddressResolver ?
         return LibBridgeRead.isMessageSent(mhash);
     }
 
@@ -104,7 +102,6 @@ contract Bridge is EssentialContract, IBridge {
         bytes calldata proof
     ) public view virtual returns (bool) {
         return
-            // LibBridgeRead
             AddressResolver(this).isMessageReceived(mhash, srcChainId, proof);
     }
 
@@ -122,6 +119,6 @@ contract Bridge is EssentialContract, IBridge {
     }
 
     function isDestChainEnabled(uint256 _chainId) public view returns (bool) {
-        return state.isDestChainEnabled(_chainId); //LibBridgeRead
+        return state.isDestChainEnabled(_chainId);
     }
 }
