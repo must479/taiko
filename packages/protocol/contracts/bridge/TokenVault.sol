@@ -11,6 +11,8 @@ pragma solidity ^0.8.9;
 import "@openzeppelin/contracts-upgradeable/token/ERC20/utils/SafeERC20Upgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/utils/Create2Upgradeable.sol";
 
+import "../libs/LibTrieProof.sol";
+import "../bridge/libs/LibBridgeData.sol";
 import "../common/EssentialContract.sol";
 import "../L1/TkoToken.sol";
 import "./BridgedERC20.sol";
@@ -25,6 +27,7 @@ import "./IBridge.sol";
  */
 contract TokenVault is EssentialContract {
     using SafeERC20Upgradeable for ERC20Upgradeable;
+    using LibBridgeData for IBridge.Message;
 
     /*********************
      * Structs           *
@@ -36,6 +39,13 @@ contract TokenVault is EssentialContract {
         uint8 decimals;
         string symbol;
         string name;
+    }
+
+    struct ReceiveERC20CallData {
+        CanonicalERC20 canonicalToken;
+        address to;
+        address owner;
+        uint256 amount;
     }
 
     /*********************
@@ -90,6 +100,15 @@ contract TokenVault is EssentialContract {
         uint256 srcChainId,
         address token,
         uint256 amount
+    );
+
+    event ERC20Released(
+        address indexed to,
+        address from,
+        uint256 destChainId,
+        address token,
+        uint256 amount,
+        bytes32 signal
     );
 
     /*********************
@@ -223,6 +242,58 @@ contract TokenVault is EssentialContract {
         }(message);
 
         emit ERC20Sent(to, destChainId, token, _amount, signal);
+    }
+
+    /**
+     * Releases tokens held by the TokenVault on the src chain
+     *  when the dest chain bridge has failed to process
+     *  the bridge message transaction/
+     *
+     * @param signal Signal to check in merkle proof.
+     * @param proof A merkle proof that the dest chain bridge has the signal
+     *              in status Failed.
+     */
+    function releaseTokens(
+        bytes32 signal,
+        address destBridge,
+        IBridge.Message calldata message,
+        bytes32 stateRoot,
+        bytes calldata proof
+    ) external payable nonReentrant {
+        require(msg.sender == message.owner, "V:owner");
+        require(signal == message.hashMessage(), "V:signal");
+        require(message.destChainId != block.chainid, "V:chainid");
+
+        LibTrieProof.verify(
+            stateRoot,
+            destBridge,
+            keccak256(abi.encode(signal, uint(1), uint(0))), // state is 0 index, mapping is 1 index on the state, signal is location in the mapping.
+            bytes32(uint256(LibBridgeData.MessageStatus.FAILED)),
+            proof
+        );
+
+        ReceiveERC20CallData memory data = abi.decode(
+            message.data,
+            (ReceiveERC20CallData)
+        );
+        address token = data.canonicalToken.addr;
+
+        if (isBridgedToken[token]) {
+            BridgedERC20(token).bridgeMintTo(msg.sender, data.amount);
+        } else {
+            // The canonical token lives on this chain
+            ERC20Upgradeable t = ERC20Upgradeable(token);
+            t.transfer(msg.sender, data.amount);
+        }
+
+        emit ERC20Released(
+            msg.sender,
+            address(this),
+            message.destChainId,
+            token,
+            data.amount,
+            signal
+        );
     }
 
     /**

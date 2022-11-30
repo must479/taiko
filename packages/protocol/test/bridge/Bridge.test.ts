@@ -1,76 +1,12 @@
 import { expect } from "chai"
-import { BigNumber, Signer } from "ethers"
+import { BigNumber } from "ethers"
 import { ethers } from "hardhat"
 import RLP from "rlp"
-import { AddressManager, Bridge, EtherVault } from "../../typechain"
+import { AddressManager } from "../../typechain"
+import { deployBridge, deployBridgeFixture } from "../utils/fixtures/bridge"
 import { Message } from "../utils/message"
 import { Block, BlockHeader, EthGetProofResponse } from "../utils/rpc"
 
-async function deployBridge(
-    signer: Signer,
-    addressManager: AddressManager,
-    destChain: number,
-    srcChain: number
-): Promise<{ bridge: Bridge; etherVault: EtherVault }> {
-    const libTrieProof = await (await ethers.getContractFactory("LibTrieProof"))
-        .connect(signer)
-        .deploy()
-
-    const libBridgeProcess = await (
-        await ethers.getContractFactory("LibBridgeProcess", {
-            libraries: {
-                LibTrieProof: libTrieProof.address,
-            },
-        })
-    )
-        .connect(signer)
-        .deploy()
-
-    const libBridgeRetry = await (
-        await ethers.getContractFactory("LibBridgeRetry")
-    )
-        .connect(signer)
-        .deploy()
-
-    const BridgeFactory = await ethers.getContractFactory("Bridge", {
-        libraries: {
-            LibBridgeProcess: libBridgeProcess.address,
-            LibBridgeRetry: libBridgeRetry.address,
-            LibTrieProof: libTrieProof.address,
-        },
-    })
-
-    const bridge: Bridge = await BridgeFactory.connect(signer).deploy()
-
-    await bridge.connect(signer).init(addressManager.address)
-
-    await bridge.connect(signer).enableDestChain(destChain, true)
-
-    const etherVault: EtherVault = await (
-        await ethers.getContractFactory("EtherVault")
-    )
-        .connect(signer)
-        .deploy()
-
-    await etherVault.connect(signer).init(addressManager.address)
-
-    await etherVault.connect(signer).authorize(bridge.address, true)
-
-    await etherVault.connect(signer).authorize(await signer.getAddress(), true)
-
-    await addressManager.setAddress(
-        `${srcChain}.ether_vault`,
-        etherVault.address
-    )
-
-    await signer.sendTransaction({
-        to: etherVault.address,
-        value: BigNumber.from(100000000),
-        gasLimit: 1000000,
-    })
-
-    return { bridge, etherVault }
-}
 describe("Bridge", function () {
     async function deployBridgeFixture() {
         const [owner, nonOwner] = await ethers.getSigners()
@@ -416,90 +352,6 @@ describe("Bridge", function () {
 })
 
 describe("integration:Bridge", function () {
-    async function deployBridgeFixture() {
-        const [owner, nonOwner] = await ethers.getSigners()
-
-        const { chainId } = await ethers.provider.getNetwork()
-
-        const srcChainId = chainId
-
-        // seondary node to deploy L2 on
-        const l2Provider = new ethers.providers.JsonRpcProvider(
-            "http://localhost:28545"
-        )
-
-        const l2Signer = await l2Provider.getSigner(
-            "0x4D9E82AC620246f6782EAaBaC3E3c86895f3f0F8"
-        )
-
-        const l2NonOwner = await l2Provider.getSigner()
-
-        const l2Network = await l2Provider.getNetwork()
-        const enabledDestChainId = l2Network.chainId
-
-        const addressManager: AddressManager = await (
-            await ethers.getContractFactory("AddressManager")
-        ).deploy()
-        await addressManager.init()
-
-        const l2AddressManager: AddressManager = await (
-            await ethers.getContractFactory("AddressManager")
-        )
-            .connect(l2Signer)
-            .deploy()
-        await l2AddressManager.init()
-
-        const { bridge: l1Bridge, etherVault: l1EtherVault } =
-            await deployBridge(
-                owner,
-                addressManager,
-                enabledDestChainId,
-                srcChainId
-            )
-
-        const { bridge: l2Bridge, etherVault: l2EtherVault } =
-            await deployBridge(
-                l2Signer,
-                l2AddressManager,
-                srcChainId,
-                enabledDestChainId
-            )
-
-        await addressManager.setAddress(
-            `${enabledDestChainId}.bridge`,
-            l2Bridge.address
-        )
-
-        await l2AddressManager
-            .connect(l2Signer)
-            .setAddress(`${srcChainId}.bridge`, l1Bridge.address)
-
-        const headerSync = await (
-            await ethers.getContractFactory("TestHeaderSync")
-        )
-            .connect(l2Signer)
-            .deploy()
-
-        await l2AddressManager
-            .connect(l2Signer)
-            .setAddress(`${enabledDestChainId}.taiko`, headerSync.address)
-
-        return {
-            owner,
-            l2Signer,
-            nonOwner,
-            l2NonOwner,
-            l1Bridge,
-            l2Bridge,
-            addressManager,
-            enabledDestChainId,
-            l1EtherVault,
-            l2EtherVault,
-            srcChainId,
-            headerSync,
-        }
-    }
-
     describe("processMessage()", function () {
         it("should throw if message.gasLimit == 0 & msg.sender is not message.owner", async function () {
             const {
@@ -1010,8 +862,6 @@ describe("integration:Bridge", function () {
                 [{ header: blockHeader, proof: encodedProof }]
             )
 
-            // ROGER: this is where we at, we need now to deploy a custom TestHeaderSync that implements
-            // IHeaderSync where we can manually save synced headers.
             await l2Bridge.processMessage(message, signalProof, {
                 gasLimit: BigNumber.from(2000000),
             })
